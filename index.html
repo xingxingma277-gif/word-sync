@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>记单词 · 听力播放器 (云同步版)</title>
+<style>
+:root{
+  --paper:#EEF0EA;
+  --card:#FFFFFF;
+  --ink:#24312B;
+  --ink-soft:#5B6960;
+  --line:#D8D2C0;
+  --moss:#3F6C51;
+  --moss-dark:#2E5140;
+  --ochre:#C97B3D;
+  --ochre-soft:#F3DFC7;
+  --danger:#B5533C;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  min-height:100vh;
+  padding:24px 16px 80px;
+}
+.wrap{max-width:720px;margin:0 auto;}
+header{margin-bottom:20px;}
+header h1{
+  font-family:Georgia,"Noto Serif SC",serif;
+  font-size:26px;
+  margin:0 0 4px;
+  color:var(--moss-dark);
+  letter-spacing:0.5px;
+}
+header p{margin:0;color:var(--ink-soft);font-size:13px;}
+
+.card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:18px;
+  margin-bottom:18px;
+  box-shadow:0 1px 2px rgba(0,0,0,0.03);
+}
+.card h2{
+  font-size:14px;
+  margin:0 0 12px;
+  color:var(--moss-dark);
+  text-transform:uppercase;
+  letter-spacing:1px;
+  font-weight:600;
+}
+
+.add-row{display:flex;gap:8px;flex-wrap:wrap;}
+.add-row input{
+  flex:1 1 140px;
+  padding:9px 10px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  font-size:14px;
+  background:var(--paper);
+  color:var(--ink);
+}
+.add-row input:focus{outline:2px solid var(--moss);outline-offset:1px;}
+button{
+  cursor:pointer;
+  border:none;
+  border-radius:6px;
+  font-size:13px;
+  padding:9px 14px;
+  font-weight:600;
+  transition:transform .08s ease, opacity .15s ease;
+}
+button:active{transform:scale(0.96);}
+button:focus-visible{outline:2px solid var(--moss-dark);outline-offset:2px;}
+.btn-primary{background:var(--moss);color:#fff;}
+.btn-primary:hover{background:var(--moss-dark);}
+.btn-ghost{background:transparent;color:var(--moss-dark);border:1px solid var(--moss);}
+.btn-ghost:hover{background:#EAF0EC;}
+.btn-danger{background:transparent;color:var(--danger);border:1px solid var(--danger);}
+.btn-danger:hover{background:#FBEDE8;}
+.btn-small{padding:4px 8px;font-size:12px;}
+button:disabled{opacity:0.4;cursor:not-allowed;}
+
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;}
+
+.wordlist{border-top:1px solid var(--line);margin-top:12px;}
+.word-row{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 4px;
+  border-bottom:1px solid var(--line);
+  font-size:14px;
+}
+.word-row.playing{background:var(--ochre-soft);border-radius:6px;}
+.weak-badge{
+  display:inline-block;margin-left:6px;padding:1px 6px;border-radius:10px;
+  background:var(--ochre);color:#241505;font-size:11px;font-weight:700;vertical-align:middle;
+}
+.word-row .txt{flex:1;min-width:0;}
+.word-row .en{font-weight:600;font-family:Georgia,"Noto Serif SC",serif;}
+.word-row .zh{color:var(--ink-soft);font-size:13px;margin-left:6px;}
+.word-row .ops{display:flex;gap:4px;flex-shrink:0;}
+.empty-hint{color:var(--ink-soft);font-size:13px;padding:20px 4px;text-align:center;}
+
+.stage{
+  background:var(--ink);
+  border-radius:10px;
+  padding:28px 18px;
+  text-align:center;
+  margin-bottom:14px;
+  min-height:120px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+}
+.letters{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;min-height:44px;}
+.letter-tile{
+  width:34px;height:40px;
+  background:#33443B;
+  color:#EEF0EA;
+  border-radius:5px;
+  display:flex;align-items:center;justify-content:center;
+  font-family:"SFMono-Regular",Menlo,Consolas,monospace;
+  font-size:18px;font-weight:600;
+  opacity:0.35;
+  transition:opacity .15s ease, background .15s ease;
+}
+.letter-tile.lit{opacity:1;background:var(--ochre);color:#241505;}
+.stage-word{color:#fff;font-family:Georgia,"Noto Serif SC",serif;font-size:22px;min-height:28px;}
+.stage-zh{color:var(--ochre-soft);font-size:15px;min-height:20px;}
+.stage-idle{color:#8A9690;font-size:13px;}
+
+.controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.controls label{font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;}
+select,input[type=range]{accent-color:var(--moss);}
+select{padding:5px 6px;border-radius:5px;border:1px solid var(--line);font-size:12px;background:#fff;}
+
+.row-select{display:flex;align-items:center;}
+.row-select input{width:16px;height:16px;}
+
+footer{text-align:center;color:var(--ink-soft);font-size:12px;margin-top:24px;}
+.note{font-size:12px;color:var(--ink-soft);line-height:1.6;margin-top:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>记单词 · 听力播放器 (云同步版)</h1>
+    <p>把单词整理成词库，任意排序，生成一段可以闭眼听的朗读 —— 拼写 → 单词读两遍 → 中文释义</p>
+  </header>
+
+  <div class="card">
+    <h2>添加单词</h2>
+    <div class="add-row">
+      <input id="inWord" type="text" placeholder="英文单词，如 respond" autocomplete="off" style="flex:2;">
+      <input id="inDate" type="date">
+    </div>
+    <div id="posRows" style="margin-top:10px;"></div>
+    <div class="toolbar" style="margin-top:2px;">
+      <button class="btn-ghost btn-small" id="btnAddPosRow">+ 再加一个词性/释义</button>
+    </div>
+    <button class="btn-primary" id="btnAdd" style="margin-top:6px;">添加到词库</button>
+  </div>
+
+  <div class="card">
+    <h2>批量导入（一次粘贴一大堆）</h2>
+    <p class="note" style="margin-top:0;">每行一个单词，单词和释义之间用 <b>制表符(Tab)</b> 或 <b>逗号</b> 隔开，一个词多个词性写在同一行里，用中文分号隔开，比如：<br>
+    <code>convolution,n. 卷积</code><br>
+    <code>respond,vi. 响应；回应</code><br>
+    这一整批会统一标记成下面选的日期，方便以后按日期复习。<br>
+    </p>
+    <div class="add-row" style="margin-bottom:8px;">
+      <label style="font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;">这批的日期
+        <input id="bulkDate" type="date">
+      </label>
+    </div>
+    <textarea id="bulkText" rows="6" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:6px;font-size:13px;font-family:inherit;background:var(--paper);color:var(--ink);" placeholder="convolution,n. 卷积&#10;impulse response,n. 冲激响应&#10;steady,adj. 稳定的；不变的"></textarea>
+    <div class="toolbar" style="margin-bottom:0;">
+      <button class="btn-primary btn-small" id="btnBulkAdd">批量添加</button>
+      <span class="note" id="bulkResult" style="margin:0;"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>播放</h2>
+    <div class="stage" id="stage">
+      <div class="stage-idle" id="stageIdle">选好单词，点击「开始播放」</div>
+      <div class="letters" id="letters" style="display:none;"></div>
+      <div class="stage-word" id="stageWord"></div>
+      <div class="stage-zh" id="stageZh"></div>
+    </div>
+    <div class="controls">
+      <button class="btn-primary" id="btnPlay">▶ 开始播放</button>
+      <button class="btn-ghost" id="btnPause" disabled>暂停</button>
+      <button class="btn-ghost" id="btnStop" disabled>停止</button>
+      <label>语速
+        <input type="range" id="rate" min="0.6" max="1.3" step="0.1" value="0.9">
+      </label>
+      <label>拼读语速
+        <input type="range" id="spellRate" min="0.3" max="0.8" step="0.05" value="0.45">
+      </label>
+      <label>英文发音
+        <select id="voiceEn"></select>
+      </label>
+      <label>中文发音
+        <select id="voiceZh"></select>
+      </label>
+    </div>
+    <p class="note" id="voiceNote"></p>
+  </div>
+
+  <div class="card">
+    <h2>词库（按日期分组，勾选加入播放）</h2>
+    <div class="toolbar">
+      <label style="font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;">显示
+        <select id="dateFilter"></select>
+      </label>
+      <button class="btn-primary btn-small" id="btnReviewToday">📅 只选今天</button>
+      <button class="btn-primary btn-small" id="btnWeak">🔁 只选薄弱词</button>
+      <button class="btn-ghost btn-small" id="btnSelectAll">全选</button>
+      <button class="btn-ghost btn-small" id="btnSelectNone">全不选</button>
+      <button class="btn-ghost btn-small" id="btnShuffle">🔀 打乱播放顺序</button>
+    </div>
+    <div class="wordlist" id="wordlist"></div>
+  </div>
+
+  <footer>双擎混合同步已开启。数据已接入公网 JSONBlob 和局域网私有云。</footer>
+</div>
+
+<script>
+// ---------- cloud.js 部分 ----------
+const LOCAL_API = "http://192.168.10.5:8080/api/sync";
+const CLOUD_API = "https://jsonblob.com/api/jsonBlob/019f3fc7-b722-7365-83e7-207eb7ed8e3f";
+
+let onCloudUpdateCallback = null;
+let pollTimer = null;
+
+function setOnCloudUpdate(callback) {
+    onCloudUpdateCallback = callback;
+}
+
+async function fetchWithTimeout(url, options, timeout = 3000) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+}
+
+async function pullData() {
+    let source = "内网电脑直连";
+    try {
+        let res = await fetchWithTimeout(LOCAL_API, {}, 1000);
+        if (!res.ok) throw new Error("Local failed");
+        let data = await res.json();
+        return { data, source };
+    } catch (e1) {
+        source = "公网漫游";
+        try {
+            let res = await fetchWithTimeout(CLOUD_API, {
+                headers: { 'Accept': 'application/json' }
+            }, 5000);
+            if (!res.ok) throw new Error("Cloud failed");
+            let data = await res.json();
+            return { data, source };
+        } catch (e2) {
+            throw new Error("双擎全部失联");
+        }
+    }
+}
+
+async function subscribeToWords() {
+    async function poll() {
+        try {
+            const result = await pullData();
+            if (onCloudUpdateCallback) {
+                onCloudUpdateCallback(result.data.words || []);
+            }
+            console.log(`[同步成功] 数据来源: ${result.source}`);
+        } catch (e) {
+            console.warn("网络离线，使用本地缓存...", e);
+        }
+        pollTimer = setTimeout(poll, 3000);
+    }
+    poll();
+}
+
+async function saveWordsToCloud(words) {
+    const payload = JSON.stringify({ words });
+
+    const pushLocal = fetchWithTimeout(LOCAL_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+    }, 2000).catch(e => console.warn("内网写入失败(可能已出门)"));
+
+    const pushCloud = fetchWithTimeout(CLOUD_API, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: payload
+    }, 5000).catch(e => console.warn("公网写入失败"));
+
+    await Promise.allSettled([pushLocal, pushCloud]);
+    console.log("[同步引擎] 双擎写入指令已发送");
+}
+
+// ---------- app.js 部分 ----------
+let words = []; 
+let queue = [];
+let playIndex = -1;
+let stopped = true;
+let paused = false;
+
+const $ = (id) => document.getElementById(id);
+
+// 1. 尝试优先从本地缓存读取（防止云端连不上时数据丢失白屏）
+function loadLocalCache() {
+    try {
+        const saved = localStorage.getItem('wordbank_local');
+        if (saved) {
+            words = JSON.parse(saved);
+            renderList();
+        }
+    } catch (e) {}
+}
+loadLocalCache();
+
+// 2. 当云端数据发生变化时，这个函数会被调用，覆盖本地数据
+setOnCloudUpdate((newWords) => {
+    // 只有当云端有真实数据时，才进行覆盖
+    if (newWords && newWords.length > 0) {
+        words = newWords;
+        localStorage.setItem('wordbank_local', JSON.stringify(words));
+        renderList();
+    }
+});
+
+// 监听云端数据
+subscribeToWords();
+
+// 保存到云端和本地
+async function saveWords(){
+  try{
+    // 无论如何先存本地，保证刷新不丢
+    localStorage.setItem('wordbank_local', JSON.stringify(words));
+    // 再尝试推送到云端
+    await saveWordsToCloud(words);
+  }catch(e){
+    console.error('save failed', e);
+  }
+}
+
+// ---------- date helpers ----------
+function todayStr(){
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+
+// ---------- word list rendering ----------
+function groupByDate(list){
+  const map = new Map();
+  list.forEach(w => {
+    const d = w.date || '未标注日期';
+    if(!map.has(d)) map.set(d, []);
+    map.get(d).push(w);
+  });
+  const keys = [...map.keys()].sort((a,b) => {
+    if(a==='未标注日期') return 1;
+    if(b==='未标注日期') return -1;
+    return b.localeCompare(a);
+  });
+  return keys.map(k => ({date:k, items:map.get(k)}));
+}
+
+function updateDateFilterOptions(){
+  const sel = $('dateFilter');
+  const prev = sel.value;
+  const groups = groupByDate(words);
+  sel.innerHTML = '<option value="all">全部日期</option>' +
+    groups.map(g => `<option value="${g.date}">${g.date}（${g.items.length}）</option>`).join('');
+  if([...sel.options].some(o=>o.value===prev)) sel.value = prev;
+}
+
+function renderList(){
+  const el = $('wordlist');
+  el.innerHTML = '';
+  updateDateFilterOptions();
+  if(words.length === 0){
+    el.innerHTML = '<div class="empty-hint">还没有单词，先在上面添加几个吧</div>';
+    return;
+  }
+  const filterVal = $('dateFilter').value || 'all';
+  const groups = groupByDate(words);
+  const visible = groups.filter(g => filterVal==='all' || g.date===filterVal);
+  if(visible.length === 0){
+    el.innerHTML = '<div class="empty-hint">这个日期下没有单词</div>';
+    return;
+  }
+  visible.forEach(g => {
+    const allSelected = g.items.every(w=>w.selected);
+    const header = document.createElement('div');
+    header.className = 'date-group-header';
+    header.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 4px 6px;font-size:12px;color:var(--moss-dark);font-weight:700;border-bottom:1px solid var(--line);margin-top:6px;';
+    header.innerHTML = `
+      <span class="row-select"><input type="checkbox" class="group-toggle" ${allSelected?'checked':''}></span>
+      <span style="flex:1;">${g.date}</span>
+      <span style="color:var(--ink-soft);font-weight:400;">${g.items.length} 个</span>
+    `;
+    header.querySelector('.group-toggle').addEventListener('change', (e) => {
+      g.items.forEach(w => w.selected = e.target.checked);
+      saveWords(); renderList();
+    });
+    el.appendChild(header);
+    g.items.forEach(w => el.appendChild(buildRow(w)));
+  });
+}
+
+function buildRow(w){
+  const row = document.createElement('div');
+  row.className = 'word-row';
+  row.dataset.id = w.id;
+  const isWeak = (w.repeatCount||1) >= 2 && !w.mastered;
+  const badge = isWeak ? `<span class="weak-badge">🔁×${w.repeatCount}</span>` : '';
+  row.innerHTML = `
+    <span class="row-select"><input type="checkbox" ${w.selected ? 'checked' : ''} data-act="sel"></span>
+    <span class="txt"><span class="en">${escapeHtml(w.word)}</span>${badge}<span class="zh">${escapeHtml(w.meaning)}</span></span>
+    <span class="ops">
+      ${isWeak ? '<button class="btn-ghost btn-small" data-act="master">标记已掌握</button>' : ''}
+      <button class="btn-danger btn-small" data-act="del">删除</button>
+    </span>
+  `;
+  return row;
+}
+function escapeHtml(s){
+  return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function mergeMeaning(oldM, newM){
+  if(!newM) return oldM;
+  if(!oldM) return newM;
+  const oldParts = oldM.split(/[;；]/).map(s=>s.trim()).filter(Boolean);
+  const newParts = newM.split(/[;；]/).map(s=>s.trim()).filter(Boolean);
+  newParts.forEach(p => {
+    if(!oldParts.some(op => op.toLowerCase() === p.toLowerCase())) oldParts.push(p);
+  });
+  return oldParts.join('；');
+}
+
+$('dateFilter').addEventListener('change', renderList);
+
+$('wordlist').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  const cb = e.target.matches('input[data-act="sel"]') ? e.target : null;
+  const row = e.target.closest('.word-row');
+  if(!row) return;
+  const id = row.dataset.id;
+  const idx = words.findIndex(w => String(w.id) === id);
+  if(idx === -1) return;
+
+  if(cb){
+    words[idx].selected = cb.checked;
+    saveWords();
+    return;
+  }
+  if(!btn) return;
+  if(btn.dataset.act === 'del'){
+    words.splice(idx,1);
+    saveWords();
+    renderList();
+  }else if(btn.dataset.act === 'master'){
+    words[idx].mastered = true;
+    saveWords();
+    renderList();
+  }
+});
+
+$('btnReviewToday').addEventListener('click', () => {
+  const t = todayStr();
+  words.forEach(w => w.selected = (w.date === t));
+  saveWords(); renderList();
+});
+
+$('btnWeak').addEventListener('click', () => {
+  words.forEach(w => w.selected = ((w.repeatCount||1) >= 2 && !w.mastered));
+  saveWords(); renderList();
+});
+
+// ---------- pos rows for quick multi-meaning entry ----------
+const POS_OPTIONS = ['', 'n.', 'v.', 'vt.', 'vi.', 'adj.', 'adv.', 'prep.', 'pron.', 'conj.', 'interj.', 'pl.'];
+function createPosRow(){
+  const row = document.createElement('div');
+  row.className = 'pos-row';
+  row.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
+  const selectHtml = POS_OPTIONS.map(p => `<option value="${p}">${p || '无词性'}</option>`).join('');
+  row.innerHTML = `
+    <select class="posSelect" style="flex:0 0 90px;">${selectHtml}</select>
+    <input class="posMeaning" type="text" placeholder="释义，如 卷积" style="flex:1;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-size:14px;background:var(--paper);color:var(--ink);">
+    <button class="btn-danger btn-small removePosRow" type="button">×</button>
+  `;
+  row.querySelector('.removePosRow').addEventListener('click', () => {
+    if($('posRows').children.length > 1) row.remove();
+    else row.querySelector('.posMeaning').value = '';
+  });
+  return row;
+}
+$('posRows').appendChild(createPosRow());
+$('btnAddPosRow').addEventListener('click', () => $('posRows').appendChild(createPosRow()));
+
+$('inDate').value = todayStr();
+$('bulkDate').value = todayStr();
+
+$('btnAdd').addEventListener('click', () => {
+  const w = $('inWord').value.trim();
+  if(!w){ $('inWord').focus(); return; }
+  const date = $('inDate').value || todayStr();
+  const rows = [...$('posRows').querySelectorAll('.pos-row')];
+  const parts = rows.map(r => {
+    const pos = r.querySelector('.posSelect').value;
+    const m = r.querySelector('.posMeaning').value.trim();
+    if(!m) return null;
+    return pos ? `${pos} ${m}` : m;
+  }).filter(Boolean);
+  const meaning = parts.join('；');
+  const existing = words.find(x => x.word.toLowerCase() === w.toLowerCase());
+  if(existing){
+    existing.meaning = mergeMeaning(existing.meaning, meaning);
+    existing.repeatCount = (existing.repeatCount||1) + 1;
+    existing.mastered = false;
+  }else{
+    words.push({id: Date.now()+Math.random(), word:w, meaning, date, selected:true, repeatCount:1, mastered:false});
+  }
+  $('inWord').value = '';
+  $('posRows').innerHTML = '';
+  $('posRows').appendChild(createPosRow());
+  $('inWord').focus();
+  saveWords();
+  renderList();
+});
+$('inWord').addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); $('posRows').querySelector('.posMeaning').focus(); } });
+
+function parseBulkLine(line){
+  let parts;
+  if(line.includes('\t')) parts = line.split('\t');
+  else if(line.includes(',') || line.includes('，')) parts = line.split(/,|，/);
+  else parts = line.split(/\s{2,}/);
+  const word = (parts[0]||'').trim();
+  const meaning = parts.slice(1).join(' ').trim();
+  return {word, meaning};
+}
+
+$('btnBulkAdd').addEventListener('click', () => {
+  const raw = $('bulkText').value;
+  const date = $('bulkDate').value || todayStr();
+  const lines = raw.split('\n').map(l=>l.trim()).filter(Boolean);
+  let added = 0, updated = 0, skipped = 0;
+  lines.forEach(line => {
+    const {word, meaning} = parseBulkLine(line);
+    if(!word){ skipped++; return; }
+    const existing = words.find(w => w.word.toLowerCase() === word.toLowerCase());
+    if(existing){
+      existing.meaning = mergeMeaning(existing.meaning, meaning);
+      existing.repeatCount = (existing.repeatCount||1) + 1;
+      existing.mastered = false;
+      updated++;
+    }else{
+      words.push({id: Date.now()+Math.random(), word, meaning, date, selected:true, repeatCount:1, mastered:false});
+      added++;
+    }
+  });
+  saveWords(); renderList();
+  $('bulkResult').textContent = `新增 ${added} 个，更新 ${updated} 个${skipped?`，跳过 ${skipped} 行（没识别出单词）`:''}`;
+  $('bulkText').value = '';
+});
+
+function expandForSpeech(meaning){
+  if(!meaning) return meaning;
+  let s = meaning;
+  const map = [
+    [/\bvt\.\s*/gi, '及物动词，'],
+    [/\bvi\.\s*/gi, '不及物动词，'],
+    [/\badj\.\s*/gi, '形容词，'],
+    [/\badv\.\s*/gi, '副词，'],
+    [/\bprep\.\s*/gi, '介词，'],
+    [/\bpron\.\s*/gi, '代词，'],
+    [/\bconj\.\s*/gi, '连词，'],
+    [/\binterj\.\s*/gi, '感叹词，'],
+    [/\bpl\.\s*/gi, '复数，'],
+    [/\bn\.\s*/gi, '名词，'],
+    [/\bv\.\s*/gi, '动词，'],
+  ];
+  map.forEach(([re, rep]) => { s = s.replace(re, rep); });
+  s = s.replace(/[;；]/g, '，').replace(/\//g, '，');
+  return s;
+}
+
+$('btnSelectAll').addEventListener('click', () => { words.forEach(w=>w.selected=true); saveWords(); renderList(); });
+$('btnSelectNone').addEventListener('click', () => { words.forEach(w=>w.selected=false); saveWords(); renderList(); });
+$('btnShuffle').addEventListener('click', () => {
+  for(let i=words.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [words[i],words[j]]=[words[j],words[i]];
+  }
+  saveWords(); renderList();
+});
+
+// ---------- voices ----------
+let voicesEn = [], voicesZh = [];
+function populateVoices(){
+  const all = speechSynthesis.getVoices();
+  voicesEn = all.filter(v => v.lang && v.lang.toLowerCase().startsWith('en'));
+  voicesZh = all.filter(v => v.lang && v.lang.toLowerCase().startsWith('zh'));
+  fillSelect($('voiceEn'), voicesEn, 'en');
+  fillSelect($('voiceZh'), voicesZh, 'zh');
+  if(voicesEn.length===0 || voicesZh.length===0){
+    $('voiceNote').textContent = '当前浏览器可用的语音较少（尤其中文），建议在电脑 Chrome / Edge 里打开效果最好。';
+  }else{
+    $('voiceNote').textContent = '';
+  }
+}
+function fillSelect(sel, list, tag){
+  sel.innerHTML = '';
+  if(list.length===0){
+    const opt = document.createElement('option');
+    opt.textContent = '（系统默认）';
+    sel.appendChild(opt);
+    return;
+  }
+  list.forEach((v,i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = `${v.name} (${v.lang})`;
+    sel.appendChild(opt);
+  });
+}
+speechSynthesis.onvoiceschanged = populateVoices;
+populateVoices();
+
+// ---------- speaking ----------
+function speak(text, lang, rate, voice){
+  return new Promise((resolve) => {
+    if(!text){ resolve(); return; }
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang;
+    u.rate = rate;
+    if(voice) u.voice = voice;
+    u.onend = resolve;
+    u.onerror = resolve;
+    speechSynthesis.speak(u);
+  });
+}
+function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+function pickVoice(list, selectEl){
+  const idx = selectEl.value;
+  if(idx==='' || !list[idx]) return null;
+  return list[idx];
+}
+
+function letterTiles(word){
+  const box = $('letters');
+  box.innerHTML = '';
+  box.style.display = 'flex';
+  [...word.toUpperCase()].forEach(ch => {
+    const t = document.createElement('div');
+    t.className = 'letter-tile';
+    t.textContent = ch === ' ' ? '·' : ch;
+    box.appendChild(t);
+  });
+  return box.children;
+}
+async function animateSpell(word, perLetterMs){
+  const tiles = letterTiles(word);
+  for(let i=0;i<tiles.length;i++){
+    tiles[i].classList.add('lit');
+    await wait(perLetterMs);
+  }
+}
+
+async function playFrom(idx){
+  stopped = false;
+  $('stageIdle').style.display = 'none';
+  for(let i=idx; i<queue.length; i++){
+    if(stopped) break;
+    playIndex = i;
+    highlightPlaying(queue[i].id);
+    const rate = parseFloat($('rate').value);
+    const enVoice = pickVoice(voicesEn, $('voiceEn'));
+    const zhVoice = pickVoice(voicesZh, $('voiceZh'));
+
+    $('stageWord').textContent = '';
+    $('stageZh').textContent = '';
+
+    const spellRate = parseFloat($('spellRate').value);
+    const letters = queue[i].word.split('').join(', ') + '.';
+    const perLetterMs = Math.max(260, 480/spellRate);
+    
+    const spellPromise = speak(letters, 'en-US', spellRate, enVoice);
+    await Promise.all([spellPromise, animateSpell(queue[i].word, perLetterMs)]);
+    if(stopped) break;
+
+    $('stageWord').textContent = queue[i].word;
+    const isWeak = (queue[i].repeatCount||1) >= 2 && !queue[i].mastered;
+    const repeatTimes = isWeak ? 3 : 2;
+    for(let r=0; r<repeatTimes; r++){
+      await speak(queue[i].word, 'en-US', rate, enVoice);
+      if(stopped) break;
+      if(r < repeatTimes-1) await wait(250);
+    }
+    if(stopped) break;
+
+    $('stageZh').textContent = queue[i].meaning;
+    await speak(expandForSpeech(queue[i].meaning), 'zh-CN', rate, zhVoice);
+    if(stopped) break;
+
+    await wait(600);
+  }
+  if(!stopped){
+    finishPlayback();
+  }
+}
+
+function highlightPlaying(id){
+  document.querySelectorAll('.word-row').forEach(r => r.classList.remove('playing'));
+  const row = document.querySelector(`.word-row[data-id="${id}"]`);
+  if(row){ row.classList.add('playing'); row.scrollIntoView({block:'nearest', behavior:'smooth'}); }
+}
+
+function finishPlayback(){
+  stopped = true; paused = false;
+  $('btnPlay').textContent = '▶ 开始播放';
+  $('btnPlay').disabled = false;
+  $('btnPause').disabled = true;
+  $('btnPause').textContent = '暂停';
+  $('btnStop').disabled = true;
+  $('stageIdle').style.display = 'block';
+  $('stageIdle').textContent = '播放完啦 🎧 再来一轮，或去休息一下';
+  document.querySelectorAll('.word-row').forEach(r => r.classList.remove('playing'));
+}
+
+$('btnPlay').addEventListener('click', () => {
+  if(paused){
+    speechSynthesis.resume();
+    paused = false;
+    $('btnPause').textContent = '暂停';
+    return;
+  }
+  queue = words.filter(w => w.selected);
+  if(queue.length === 0){ alert('先在词库里勾选要播放的单词～'); return; }
+  $('btnPlay').disabled = true;
+  $('btnPause').disabled = false;
+  $('btnStop').disabled = false;
+  playFrom(0);
+});
+$('btnPause').addEventListener('click', () => {
+  if(!paused){
+    speechSynthesis.pause();
+    paused = true;
+    $('btnPause').textContent = '继续';
+  }else{
+    speechSynthesis.resume();
+    paused = false;
+    $('btnPause').textContent = '暂停';
+  }
+});
+$('btnStop').addEventListener('click', () => {
+  stopped = true;
+  speechSynthesis.cancel();
+  finishPlayback();
+});
+</script>
+</body>
+</html>
