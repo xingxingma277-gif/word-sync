@@ -229,12 +229,13 @@ footer{text-align:center;color:var(--ink-soft);font-size:12px;margin-top:24px;}
 </div>
 
 <script>
-// ---------- cloud.js 部分 ----------
+// ---------- cloud.js 部分 (GitHub Pages 同域同步) ----------
+// 内网直连（在家 WiFi）
 const LOCAL_API = "http://192.168.10.5:8080/api/sync";
-const CLOUD_API = "https://jsonblob.com/api/jsonBlob/019f3fc7-b722-7365-83e7-207eb7ed8e3f";
+// GitHub Pages 同域数据（手机 5G 也能访问，绝不被墙！）
+const GITHUB_DATA = "./data.json";
 
 let onCloudUpdateCallback = null;
-let pollTimer = null;
 
 function setOnCloudUpdate(callback) {
     onCloudUpdateCallback = callback;
@@ -251,58 +252,46 @@ async function fetchWithTimeout(url, options, timeout = 3000) {
 async function pullData() {
     let source = "内网电脑直连";
     try {
-        let res = await fetchWithTimeout(LOCAL_API, {}, 1000);
+        // 在家时：优先内网直连电脑
+        let res = await fetchWithTimeout(LOCAL_API, {}, 1500);
         if (!res.ok) throw new Error("Local failed");
         let data = await res.json();
         return { data, source };
     } catch (e1) {
-        source = "公网漫游";
+        // 出门时：从 GitHub Pages 同域读取（加随机参数防缓存）
+        source = "GitHub云端";
         try {
-            let res = await fetchWithTimeout(CLOUD_API, {
-                headers: { 'Accept': 'application/json' }
-            }, 5000);
-            if (!res.ok) throw new Error("Cloud failed");
+            let res = await fetchWithTimeout(GITHUB_DATA + "?t=" + Date.now(), {}, 8000);
+            if (!res.ok) throw new Error("GitHub failed");
             let data = await res.json();
             return { data, source };
         } catch (e2) {
-            throw new Error("双擎全部失联");
+            throw new Error("全部失联");
         }
     }
 }
 
 async function subscribeToWords() {
-    async function poll() {
-        try {
-            const result = await pullData();
-            if (onCloudUpdateCallback) {
-                onCloudUpdateCallback(result.data.words || []);
-            }
-            console.log(`[同步成功] 数据来源: ${result.source}`);
-        } catch (e) {
-            console.warn("网络离线，使用本地缓存...", e);
+    // 启动时拉取一次
+    try {
+        const result = await pullData();
+        if (onCloudUpdateCallback) {
+            onCloudUpdateCallback(result.data.words || []);
         }
-        pollTimer = setTimeout(poll, 3000);
+        console.log("[同步成功] 数据来源: " + result.source);
+    } catch (e) {
+        console.warn("使用本地缓存", e);
     }
-    poll();
 }
 
 async function saveWordsToCloud(words) {
     const payload = JSON.stringify({ words });
-
-    const pushLocal = fetchWithTimeout(LOCAL_API, {
+    // 尝试推送到内网电脑
+    fetchWithTimeout(LOCAL_API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: payload
     }, 2000).catch(e => console.warn("内网写入失败(可能已出门)"));
-
-    const pushCloud = fetchWithTimeout(CLOUD_API, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: payload
-    }, 5000).catch(e => console.warn("公网写入失败"));
-
-    await Promise.allSettled([pushLocal, pushCloud]);
-    console.log("[同步引擎] 双擎写入指令已发送");
 }
 
 // ---------- app.js 部分 ----------
