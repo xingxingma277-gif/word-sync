@@ -251,23 +251,25 @@ async function fetchWithTimeout(url, options, timeout = 3000) {
 
 async function pullData() {
     let source = "内网电脑直连";
-    try {
-        // 在家时：优先内网直连电脑
-        let res = await fetchWithTimeout(LOCAL_API, {}, 1500);
-        if (!res.ok) throw new Error("Local failed");
-        let data = await res.json();
-        return { data, source };
-    } catch (e1) {
-        // 出门时：从 GitHub Pages 同域读取（加随机参数防缓存）
-        source = "GitHub云端";
+    // HTTPS 页面（手机访问 GitHub Pages）不尝试 HTTP 内网，避免混合内容报错
+    const isSecure = location.protocol === 'https:';
+    if (!isSecure) {
         try {
-            let res = await fetchWithTimeout(GITHUB_DATA + "?t=" + Date.now(), {}, 8000);
-            if (!res.ok) throw new Error("GitHub failed");
+            let res = await fetchWithTimeout(LOCAL_API, {}, 1500);
+            if (!res.ok) throw new Error("Local failed");
             let data = await res.json();
             return { data, source };
-        } catch (e2) {
-            throw new Error("全部失联");
-        }
+        } catch (e1) { /* 降级到 GitHub */ }
+    }
+    // 从 GitHub Pages 同域读取（加随机参数防缓存）
+    source = "GitHub云端";
+    try {
+        let res = await fetchWithTimeout(GITHUB_DATA + "?t=" + Date.now(), {}, 8000);
+        if (!res.ok) throw new Error("GitHub failed");
+        let data = await res.json();
+        return { data, source };
+    } catch (e2) {
+        throw new Error("全部失联");
     }
 }
 
