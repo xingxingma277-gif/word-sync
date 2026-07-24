@@ -225,13 +225,14 @@ footer{text-align:center;color:var(--ink-soft);font-size:12px;margin-top:24px;}
     <div class="wordlist" id="wordlist"></div>
   </div>
 
-  <footer>双擎混合同步已开启。数据已接入公网 JSONBlob 和局域网私有云。</footer>
+  <footer>双擎混合同步已开启：在家连上电脑的 WiFi 自动直连电脑私有云；出门在外自动改走 GitHub。</footer>
 </div>
 
 <script>
 // ---------- cloud.js 部分 (双向同步) ----------
-// 内网直连（在家 WiFi）
-const LOCAL_API = "http://192.168.10.5:8080/api/sync";
+// 内网直连（在家 WiFi）：用相对路径，这样无论电脑当前 WiFi 分配到什么 IP 都不受影响
+// （只有当这个页面本身就是从电脑服务器 http://IP:8080/phone 打开时才会命中，见下面 isSecure 判断）
+const LOCAL_API = "/api/sync";
 // GitHub Pages 同域数据（读取用）
 const GITHUB_DATA = "./data.json";
 // GitHub API（写入用）
@@ -255,6 +256,37 @@ let onCloudUpdateCallback = null;
 
 function setOnCloudUpdate(callback) {
     onCloudUpdateCallback = callback;
+}
+
+// ---------- 合并规则：按 id，updatedAt 大者胜（与 server.py 的 merge_words 保持一致） ----------
+function mergeWords(a, b){
+  const merged = {};
+  a.forEach(w => { merged[String(w.id)] = w; });
+  b.forEach(w => {
+    const wid = String(w.id);
+    const old = merged[wid];
+    if(!old){
+      merged[wid] = w;
+    }else if((w.updatedAt||0) > (old.updatedAt||0)){
+      merged[wid] = w;
+    }
+  });
+  const now = Date.now();
+  // 墓碑保留期 180 天：太短会让掉队设备（长期没打开、本地还是旧数据）重新上线时，
+  // 把已经在别处删除、但本机还留着的旧词当成"新词"合并回来，死词复活。
+  const TOMBSTONE_TTL = 180*24*60*60*1000;
+  return Object.values(merged).filter(w => {
+    if(w.deleted){
+      const updated = w.updatedAt || 0;
+      if(now - updated > TOMBSTONE_TTL) return false;
+    }
+    return true;
+  });
+}
+
+// 只显示未删除的词
+function visibleWords(list){
+  return list.filter(w => !w.deleted);
 }
 
 async function fetchWithTimeout(url, options, timeout = 3000) {
@@ -299,21 +331,29 @@ async function subscribeToWords() {
     }
 }
 
-// 双向写入：内网能连就写内网（电脑会自动推GitHub），否则手机直接写GitHub
+// 双向写入：内网能连就写内网（电脑会自动推GitHub，并把合并结果返回），否则手机直接写GitHub
 async function saveWordsToCloud(wordsData) {
     const payload = JSON.stringify({ words: wordsData });
     const isSecure = location.protocol === 'https:';
 
-    // 情况1：在家（HTTP localhost），写入电脑服务器，电脑自动同步GitHub
+    // 情况1：在家（同源电脑服务器），写入电脑服务器，电脑自动合并+同步GitHub
     if (!isSecure) {
         try {
-            await fetchWithTimeout(LOCAL_API, {
+            const res = await fetchWithTimeout(LOCAL_API, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: payload
             }, 2000);
-            console.log("[写入] 已推送到电脑服务器");
-            return;
+            if (res.ok) {
+                const data = await res.json();
+                // 服务器返回的是合并后的最终结果（可能包含电脑端并发写入的变更），合并回本地
+                if (data && Array.isArray(data.words) && onCloudUpdateCallback) {
+                    onCloudUpdateCallback(data.words);
+                }
+                console.log("[写入] 已推送到电脑服务器");
+                return;
+            }
+            throw new Error("Local write failed: " + res.status);
         } catch (e) {
             console.warn("内网写入失败，尝试直写GitHub...");
         }
@@ -323,15 +363,24 @@ async function saveWordsToCloud(wordsData) {
     const ghToken = getGHToken();
     if (!ghToken) { console.warn("未提供Token，仅保存在本地"); return; }
 
-    try {
-        const getRes = await fetch(GH_API, {
-            headers: { 'Authorization': 'token ' + ghToken, 'Accept': 'application/vnd.github.v3+json' }
-        });
-        if (!getRes.ok) throw new Error("获取sha失败");
-        const fileInfo = await getRes.json();
-        const sha = fileInfo.sha;
+    async function doPush(sha) {
+        // 每次推送前都重新与云端当前内容合并一次，避免覆盖别的设备刚写入的数据
+        let cloudWords = [];
+        try {
+            const getRes = await fetch(GH_API, {
+                headers: { 'Authorization': 'token ' + ghToken, 'Accept': 'application/vnd.github.v3+json' }
+            });
+            if (getRes.ok) {
+                const fileInfo = await getRes.json();
+                sha = fileInfo.sha;
+                const cloudJson = decodeURIComponent(escape(atob(fileInfo.content)));
+                cloudWords = JSON.parse(cloudJson).words || [];
+            }
+        } catch (e) { /* 拿不到就直接用本地数据推送 */ }
 
-        const b64 = btoa(unescape(encodeURIComponent(payload)));
+        const merged = mergeWords(wordsData, cloudWords);
+        const mergedPayload = JSON.stringify({ words: merged });
+        const b64 = btoa(unescape(encodeURIComponent(mergedPayload)));
         const putRes = await fetch(GH_API, {
             method: 'PUT',
             headers: {
@@ -341,8 +390,18 @@ async function saveWordsToCloud(wordsData) {
             },
             body: JSON.stringify({ message: 'phone sync', content: b64, sha: sha })
         });
+        return { putRes, merged };
+    }
+
+    try {
+        let { putRes, merged } = await doPush(null);
+        if (!putRes.ok && (putRes.status === 409 || putRes.status === 422)) {
+            // sha 冲突，重新拉取后重试一次
+            ({ putRes, merged } = await doPush(null));
+        }
         if (putRes.ok) {
             console.log("[写入] 手机已直接推送到GitHub!");
+            if (onCloudUpdateCallback) onCloudUpdateCallback(merged);
         } else {
             throw new Error("GitHub写入失败: " + putRes.status);
         }
@@ -372,11 +431,10 @@ function loadLocalCache() {
 }
 loadLocalCache();
 
-// 2. 当云端数据发生变化时，这个函数会被调用，覆盖本地数据
+// 2. 当云端数据发生变化时，与本地数据合并（而不是整体覆盖），避免互相覆盖对方的修改
 setOnCloudUpdate((newWords) => {
-    // 只有当云端有真实数据时，才进行覆盖
     if (newWords && newWords.length > 0) {
-        words = newWords;
+        words = mergeWords(words, newWords);
         localStorage.setItem('wordbank_local', JSON.stringify(words));
         renderList();
     }
@@ -385,17 +443,44 @@ setOnCloudUpdate((newWords) => {
 // 监听云端数据
 subscribeToWords();
 
-// 保存到云端和本地
-async function saveWords(){
-  try{
-    // 无论如何先存本地，保证刷新不丢
-    localStorage.setItem('wordbank_local', JSON.stringify(words));
-    // 再尝试推送到云端
-    await saveWordsToCloud(words);
-  }catch(e){
-    console.error('save failed', e);
-  }
+// 保存到云端和本地（2s 防抖，避免连续操作触发多次网络请求/GitHub 推送）
+let saveTimer = null;
+function saveWords(){
+  // 无论如何先存本地，保证刷新不丢
+  try{ localStorage.setItem('wordbank_local', JSON.stringify(words)); }catch(e){}
+  if(saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    try{
+      // saveWordsToCloud 内部在写入成功后会调用 setOnCloudUpdate 注册的回调，
+      // 把合并后的结果（可能包含另一端并发写入的变更）应用回来
+      await saveWordsToCloud(words);
+    }catch(e){
+      console.error('save failed', e);
+    }
+  }, 2000);
 }
+
+// 页面即将关闭/切走时，若还有未落盘的防抖修改，立即 flush 一次，避免丢失
+// 只在同源 http（内网直连电脑服务器）时有 /api/sync 可用；HTTPS(GitHub Pages) 模式下
+// 数据已经同步写入 localStorage，等下次直写 GitHub 时会走 mergeWords 合并保护，这里无需处理
+function flushSaveNow(){
+  if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
+  try{ localStorage.setItem('wordbank_local', JSON.stringify(words)); }catch(e){}
+  const isSecure = location.protocol === 'https:';
+  if(isSecure) return;
+  const payload = JSON.stringify({ words });
+  try{
+    if(navigator.sendBeacon){
+      const blob = new Blob([payload], {type:'application/json'});
+      if(navigator.sendBeacon(LOCAL_API, blob)) return;
+    }
+  }catch(e){}
+  try{
+    fetch(LOCAL_API, {method:'POST', headers:{'Content-Type':'application/json'}, body: payload, keepalive:true});
+  }catch(e){}
+}
+window.addEventListener('pagehide', flushSaveNow);
 
 // ---------- date helpers ----------
 function todayStr(){
@@ -407,7 +492,7 @@ function todayStr(){
 // ---------- word list rendering ----------
 function groupByDate(list){
   const map = new Map();
-  list.forEach(w => {
+  visibleWords(list).forEach(w => {
     const d = w.date || '未标注日期';
     if(!map.has(d)) map.set(d, []);
     map.get(d).push(w);
@@ -433,7 +518,7 @@ function renderList(){
   const el = $('wordlist');
   el.innerHTML = '';
   updateDateFilterOptions();
-  if(words.length === 0){
+  if(visibleWords(words).length === 0){
     el.innerHTML = '<div class="empty-hint">还没有单词，先在上面添加几个吧</div>';
     return;
   }
@@ -455,7 +540,8 @@ function renderList(){
       <span style="color:var(--ink-soft);font-weight:400;">${g.items.length} 个</span>
     `;
     header.querySelector('.group-toggle').addEventListener('change', (e) => {
-      g.items.forEach(w => w.selected = e.target.checked);
+      // selected 是本机播放态，不参与同步胜负，不 bump updatedAt
+      g.items.forEach(w => { w.selected = e.target.checked; });
       saveWords(); renderList();
     });
     el.appendChild(header);
@@ -505,17 +591,20 @@ $('wordlist').addEventListener('click', (e) => {
   if(idx === -1) return;
 
   if(cb){
+    // selected 是本机播放态，不参与同步胜负，不 bump updatedAt
     words[idx].selected = cb.checked;
     saveWords();
     return;
   }
   if(!btn) return;
   if(btn.dataset.act === 'del'){
-    words.splice(idx,1);
+    words[idx].deleted = true;
+    words[idx].updatedAt = Date.now();
     saveWords();
     renderList();
   }else if(btn.dataset.act === 'master'){
     words[idx].mastered = true;
+    words[idx].updatedAt = Date.now();
     saveWords();
     renderList();
   }
@@ -523,12 +612,14 @@ $('wordlist').addEventListener('click', (e) => {
 
 $('btnReviewToday').addEventListener('click', () => {
   const t = todayStr();
-  words.forEach(w => w.selected = (w.date === t));
+  // selected 是本机播放态，不参与同步胜负，不 bump updatedAt
+  visibleWords(words).forEach(w => { w.selected = (w.date === t); });
   saveWords(); renderList();
 });
 
 $('btnWeak').addEventListener('click', () => {
-  words.forEach(w => w.selected = ((w.repeatCount||1) >= 2 && !w.mastered));
+  // selected 是本机播放态，不参与同步胜负，不 bump updatedAt
+  visibleWords(words).forEach(w => { w.selected = ((w.repeatCount||1) >= 2 && !w.mastered); });
   saveWords(); renderList();
 });
 
@@ -568,13 +659,14 @@ $('btnAdd').addEventListener('click', () => {
     return pos ? `${pos} ${m}` : m;
   }).filter(Boolean);
   const meaning = parts.join('；');
-  const existing = words.find(x => x.word.toLowerCase() === w.toLowerCase());
+  const existing = visibleWords(words).find(x => x.word.toLowerCase() === w.toLowerCase());
   if(existing){
     existing.meaning = mergeMeaning(existing.meaning, meaning);
     existing.repeatCount = (existing.repeatCount||1) + 1;
     existing.mastered = false;
+    existing.updatedAt = Date.now();
   }else{
-    words.push({id: Date.now()+Math.random(), word:w, meaning, date, selected:true, repeatCount:1, mastered:false});
+    words.push({id: Date.now()+Math.random(), word:w, meaning, date, selected:true, repeatCount:1, mastered:false, updatedAt: Date.now(), deleted:false});
   }
   $('inWord').value = '';
   $('posRows').innerHTML = '';
@@ -603,14 +695,15 @@ $('btnBulkAdd').addEventListener('click', () => {
   lines.forEach(line => {
     const {word, meaning} = parseBulkLine(line);
     if(!word){ skipped++; return; }
-    const existing = words.find(w => w.word.toLowerCase() === word.toLowerCase());
+    const existing = visibleWords(words).find(w => w.word.toLowerCase() === word.toLowerCase());
     if(existing){
       existing.meaning = mergeMeaning(existing.meaning, meaning);
       existing.repeatCount = (existing.repeatCount||1) + 1;
       existing.mastered = false;
+      existing.updatedAt = Date.now();
       updated++;
     }else{
-      words.push({id: Date.now()+Math.random(), word, meaning, date, selected:true, repeatCount:1, mastered:false});
+      words.push({id: Date.now()+Math.random(), word, meaning, date, selected:true, repeatCount:1, mastered:false, updatedAt: Date.now(), deleted:false});
       added++;
     }
   });
@@ -640,8 +733,9 @@ function expandForSpeech(meaning){
   return s;
 }
 
-$('btnSelectAll').addEventListener('click', () => { words.forEach(w=>w.selected=true); saveWords(); renderList(); });
-$('btnSelectNone').addEventListener('click', () => { words.forEach(w=>w.selected=false); saveWords(); renderList(); });
+// selected/顺序 都是本机播放态，不参与同步胜负，不 bump updatedAt
+$('btnSelectAll').addEventListener('click', () => { visibleWords(words).forEach(w=>{w.selected=true;}); saveWords(); renderList(); });
+$('btnSelectNone').addEventListener('click', () => { visibleWords(words).forEach(w=>{w.selected=false;}); saveWords(); renderList(); });
 $('btnShuffle').addEventListener('click', () => {
   for(let i=words.length-1;i>0;i--){
     const j = Math.floor(Math.random()*(i+1));
@@ -791,7 +885,7 @@ $('btnPlay').addEventListener('click', () => {
     $('btnPause').textContent = '暂停';
     return;
   }
-  queue = words.filter(w => w.selected);
+  queue = visibleWords(words).filter(w => w.selected);
   if(queue.length === 0){ alert('先在词库里勾选要播放的单词～'); return; }
   $('btnPlay').disabled = true;
   $('btnPause').disabled = false;
