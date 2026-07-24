@@ -242,8 +242,9 @@ const GH_API = "https://api.github.com/repos/xingxingma277-gif/word-sync/content
 function getGHToken() {
     let token = localStorage.getItem('gh_sync_token');
     if (!token) {
-        token = prompt("首次使用手机端写入功能，请粘贴您的 GitHub Token：\n（以 ghp_ 开头，只需输入这一次）");
-        if (token && token.startsWith('ghp_')) {
+        token = prompt("首次使用手机端写入功能，请粘贴您的 GitHub Token：\n（fine-grained 以 github_pat_ 开头，经典以 ghp_ 开头，只需输入这一次）");
+        token = token && token.trim();
+        if (token && (token.startsWith('github_pat_') || token.startsWith('ghp_'))) {
             localStorage.setItem('gh_sync_token', token);
         } else {
             return null;
